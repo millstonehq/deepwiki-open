@@ -69,6 +69,145 @@ def count_tokens(text: str, embedder_type: str = None, is_ollama_embedder: bool 
         # Rough approximation: 4 characters per token
         return len(text) // 4
 
+class TokenAwareChunkValidator(adal.core.component.DataComponent):
+    """
+    Validates and re-splits text chunks to ensure they stay under the embedding token limit.
+    Chunks that exceed MAX_EMBEDDING_TOKENS are split into smaller pieces.
+    """
+
+    def __init__(self, max_tokens: int = MAX_EMBEDDING_TOKENS, embedder_type: str = None):
+        super().__init__()
+        self.max_tokens = max_tokens
+        self.embedder_type = embedder_type
+        # Use a safe margin (95% of limit) to avoid edge cases
+        self.safe_limit = int(max_tokens * 0.95)
+
+    def _split_oversized_chunk(self, text: str, meta_data: dict) -> List[Document]:
+        """
+        Split an oversized chunk into smaller pieces that fit within token limits.
+        Uses binary search approach to find optimal split points.
+        """
+        tokens = count_tokens(text, self.embedder_type)
+
+        if tokens <= self.safe_limit:
+            return [Document(text=text, meta_data=meta_data)]
+
+        # Split by sentences first, then by words if needed
+        import re
+        sentences = re.split(r'(?<=[.!?])\s+', text)
+
+        if len(sentences) <= 1:
+            # No sentence boundaries, split by words
+            words = text.split()
+            return self._split_by_words(words, meta_data)
+
+        # Try to group sentences into chunks under the limit
+        chunks = []
+        current_chunk = []
+        current_tokens = 0
+
+        for sentence in sentences:
+            sentence_tokens = count_tokens(sentence, self.embedder_type)
+
+            if sentence_tokens > self.safe_limit:
+                # Single sentence is too large, split by words
+                if current_chunk:
+                    chunks.append(' '.join(current_chunk))
+                    current_chunk = []
+                    current_tokens = 0
+
+                words = sentence.split()
+                word_chunks = self._split_by_words(words, meta_data)
+                for wc in word_chunks:
+                    chunks.append(wc.text)
+            elif current_tokens + sentence_tokens > self.safe_limit:
+                # Adding this sentence would exceed limit, start new chunk
+                if current_chunk:
+                    chunks.append(' '.join(current_chunk))
+                current_chunk = [sentence]
+                current_tokens = sentence_tokens
+            else:
+                current_chunk.append(sentence)
+                current_tokens += sentence_tokens
+
+        if current_chunk:
+            chunks.append(' '.join(current_chunk))
+
+        # Create Document objects for each chunk
+        result = []
+        for i, chunk_text in enumerate(chunks):
+            chunk_meta = meta_data.copy() if meta_data else {}
+            chunk_meta['chunk_part'] = i + 1
+            chunk_meta['total_parts'] = len(chunks)
+            result.append(Document(text=chunk_text, meta_data=chunk_meta))
+
+        logger.info(f"Split oversized chunk ({tokens} tokens) into {len(result)} parts")
+        return result
+
+    def _split_by_words(self, words: List[str], meta_data: dict) -> List[Document]:
+        """Split a list of words into chunks that fit within token limits."""
+        chunks = []
+        current_words = []
+        current_tokens = 0
+
+        for word in words:
+            word_tokens = count_tokens(word, self.embedder_type)
+
+            if current_tokens + word_tokens > self.safe_limit:
+                if current_words:
+                    chunks.append(' '.join(current_words))
+                current_words = [word]
+                current_tokens = word_tokens
+            else:
+                current_words.append(word)
+                current_tokens += word_tokens
+
+        if current_words:
+            chunks.append(' '.join(current_words))
+
+        result = []
+        for i, chunk_text in enumerate(chunks):
+            chunk_meta = meta_data.copy() if meta_data else {}
+            chunk_meta['chunk_part'] = i + 1
+            chunk_meta['total_parts'] = len(chunks)
+            result.append(Document(text=chunk_text, meta_data=chunk_meta))
+
+        return result
+
+    def call(self, documents: List[Document]) -> List[Document]:
+        """
+        Process documents and split any that exceed the token limit.
+
+        Args:
+            documents: List of Document objects from TextSplitter
+
+        Returns:
+            List of Document objects, all within token limits
+        """
+        if not documents:
+            return documents
+
+        validated_docs = []
+        oversized_count = 0
+
+        for doc in documents:
+            tokens = count_tokens(doc.text, self.embedder_type)
+
+            if tokens <= self.safe_limit:
+                validated_docs.append(doc)
+            else:
+                oversized_count += 1
+                # Re-split this chunk
+                split_docs = self._split_oversized_chunk(doc.text, doc.meta_data)
+                validated_docs.extend(split_docs)
+
+        if oversized_count > 0:
+            logger.info(f"TokenAwareChunkValidator: Re-split {oversized_count} oversized chunks, "
+                       f"resulting in {len(validated_docs)} total chunks (was {len(documents)})")
+
+        return validated_docs
+
+
 def download_repo(repo_url: str, local_path: str, repo_type: str = None, access_token: str = None) -> str:
     """
     Downloads a Git repository (GitHub, GitLab, or Bitbucket) to a specified local path.
@@ -407,20 +546,30 @@ def prepare_data_pipeline(embedder_type: str = None, is_ollama_embedder: bool = 
 
     embedder = get_embedder(embedder_type=embedder_type)
 
+    # Add token-aware chunk validator to ensure chunks stay under embedding limit
+    chunk_validator = TokenAwareChunkValidator(
+        max_tokens=MAX_EMBEDDING_TOKENS,
+        embedder_type=embedder_type
+    )
+
     # Choose appropriate processor based on embedder type
     if embedder_type == 'ollama':
         # Use Ollama document processor for single-document processing
         embedder_transformer = OllamaDocumentProcessor(embedder=embedder)
     else:
         # Use batch processing for OpenAI and Google embedders
-        batch_size = embedder_config.get("batch_size", 500)
+        # Limit batch_size to stay under 300K token limit per API request
+        # With max 8192 tokens per chunk: 300000 / 8192 ≈ 36 chunks max
+        config_batch_size = embedder_config.get("batch_size", 500)
+        safe_batch_size = min(config_batch_size, 30)  # Conservative limit
+        logger.info(f"Using batch_size={safe_batch_size} for embeddings (config={config_batch_size})")
         embedder_transformer = ToEmbeddings(
-            embedder=embedder, batch_size=batch_size
+            embedder=embedder, batch_size=safe_batch_size
         )
 
     data_transformer = adal.Sequential(
-        splitter, embedder_transformer
-    )  # sequential will chain together splitter and embedder
+        splitter, chunk_validator, embedder_transformer
+    )  # sequential will chain together splitter, validator, and embedder
     return data_transformer
 
 def transform_documents_and_save_to_db(
