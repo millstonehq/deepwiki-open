@@ -836,6 +836,9 @@ IMPORTANT:
       // Add tokens if available
       addTokensToRequestBody(requestBody, currentToken, effectiveRepoInfo.type, selectedProviderState, selectedModelState, isCustomSelectedModelState, customSelectedModelState, language, modelExcludedDirs, modelExcludedFiles, modelIncludedDirs, modelIncludedFiles);
 
+      // Skip RAG for wiki structure generation - the prompt already contains all context (file tree + README)
+      requestBody.skip_rag = true;
+
       // Use WebSocket for communication
       let responseText = '';
 

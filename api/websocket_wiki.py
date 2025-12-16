@@ -59,6 +59,7 @@ class ChatCompletionRequest(BaseModel):
     excluded_files: Optional[str] = Field(None, description="Comma-separated list of file patterns to exclude from processing")
     included_dirs: Optional[str] = Field(None, description="Comma-separated list of directories to include exclusively")
     included_files: Optional[str] = Field(None, description="Comma-separated list of file patterns to include exclusively")
+    skip_rag: Optional[bool] = Field(False, description="Skip RAG retrieval when prompt already contains all context (e.g., wiki structure generation)")
 
 async def handle_websocket_chat(websocket: WebSocket):
     """
@@ -79,8 +80,8 @@ async def handle_websocket_chat(websocket: WebSocket):
             if hasattr(last_message, 'content') and last_message.content:
                 tokens = count_tokens(last_message.content, request.provider == "ollama")
                 logger.info(f"Request size: {tokens} tokens")
-                if tokens > 8000:
-                    logger.warning(f"Request exceeds recommended token limit ({tokens} > 7500)")
+                if tokens > 272000:
+                    logger.warning(f"Request exceeds GPT-5 input token limit ({tokens} > 272000)")
                     input_too_large = True
 
         # Create a new RAG instance for this request
@@ -189,11 +190,15 @@ async def handle_websocket_chat(websocket: WebSocket):
         # Get the query from the last message
         query = last_message.content
 
-        # Only retrieve documents if input is not too large
+        # Only retrieve documents if input is not too large and RAG is not explicitly skipped
         context_text = ""
         retrieved_documents = None
 
-        if not input_too_large:
+        # Skip RAG if explicitly requested (e.g., wiki structure generation already has all context)
+        if request.skip_rag:
+            logger.info("Skipping RAG retrieval as requested (skip_rag=True)")
+
+        if not input_too_large and not request.skip_rag:
             try:
                 # If filePath exists, modify the query for RAG to focus on the file
                 rag_query = query
