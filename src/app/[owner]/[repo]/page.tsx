@@ -682,7 +682,11 @@ Remember:
 
   // Determine the wiki structure from repository data
   const determineWikiStructure = useCallback(async (fileTree: string, readme: string, owner: string, repo: string) => {
+    console.log('=== determineWikiStructure START ===');
+    console.log('Owner:', owner, 'Repo:', repo);
+
     if (!owner || !repo) {
+      console.error('Missing owner or repo');
       setError('Invalid repository information. Owner and repo name are required.');
       setIsLoading(false);
       setEmbeddingError(false); // Reset embedding error state
@@ -701,6 +705,7 @@ Remember:
 
       // Get repository URL
       const repoUrl = getRepoUrl(effectiveRepoInfo);
+      console.log('Repo URL:', repoUrl);
 
       // Prepare request body
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -886,11 +891,16 @@ IMPORTANT:
           // Handle incoming messages
           ws.onmessage = (event) => {
             responseText += event.data;
+            // Log progress every 1000 chars
+            if (responseText.length % 1000 < event.data.length) {
+              console.log(`WebSocket received ${responseText.length} chars so far...`);
+            }
           };
 
           // Handle WebSocket close
           ws.onclose = () => {
             console.log('WebSocket connection closed for wiki structure');
+            console.log(`=== WebSocket total response: ${responseText.length} chars ===`);
             resolve();
           };
 
@@ -913,7 +923,20 @@ IMPORTANT:
         });
 
         if (!response.ok) {
-          throw new Error(`Error determining wiki structure: ${response.status}`);
+          // Try to get the actual error message from the response body
+          let errorDetail = '';
+          try {
+            const errorBody = await response.json();
+            errorDetail = errorBody.detail || errorBody.message || JSON.stringify(errorBody);
+          } catch {
+            try {
+              errorDetail = await response.text();
+            } catch {
+              errorDetail = 'Unknown error';
+            }
+          }
+          console.error(`API error ${response.status}: ${errorDetail}`);
+          throw new Error(`Error determining wiki structure (${response.status}): ${errorDetail}`);
         }
 
         // Process the response
@@ -946,10 +969,15 @@ IMPORTANT:
       responseText = responseText.replace(/^```(?:xml)?\s*/i, '').replace(/```\s*$/i, '');
 
       // Extract wiki structure from response
+      console.log('=== Extracting XML from response ===');
+      console.log('Response text preview (first 500 chars):', responseText.substring(0, 500));
       const xmlMatch = responseText.match(/<wiki_structure>[\s\S]*?<\/wiki_structure>/m);
       if (!xmlMatch) {
+        console.error('=== NO XML FOUND IN RESPONSE ===');
+        console.error('Full response text:', responseText);
         throw new Error('No valid XML found in response');
       }
+      console.log('XML match found, length:', xmlMatch[0].length);
 
       let xmlText = xmlMatch[0];
       xmlText = xmlText.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
@@ -985,6 +1013,11 @@ IMPORTANT:
 
       // Parse pages using DOM
       pages = [];
+
+      console.log('=== Parsing wiki structure ===');
+      console.log('Title element found:', !!titleEl, 'Value:', title?.substring(0, 50));
+      console.log('Description element found:', !!descriptionEl, 'Value:', description?.substring(0, 50));
+      console.log('Number of page elements found:', pagesEls?.length || 0);
 
       if (parseError && (!pagesEls || pagesEls.length === 0)) {
         console.warn('DOM parsing failed, trying regex fallback');
@@ -1085,6 +1118,14 @@ IMPORTANT:
         rootSections
       };
 
+      console.log('=== FINAL WIKI STRUCTURE ===');
+      console.log('Title:', wikiStructure.title);
+      console.log('Description:', wikiStructure.description?.substring(0, 100));
+      console.log('Pages count:', wikiStructure.pages.length);
+      console.log('Page titles:', wikiStructure.pages.map(p => p.title).join(', '));
+      console.log('Sections count:', wikiStructure.sections.length);
+      console.log('Root sections:', wikiStructure.rootSections);
+
       setWikiStructure(wikiStructure);
       setCurrentPageId(pages.length > 0 ? pages[0].id : undefined);
 
@@ -1157,7 +1198,10 @@ IMPORTANT:
       }
 
     } catch (error) {
-      console.error('Error determining wiki structure:', error);
+      console.error('=== ERROR in determineWikiStructure ===');
+      console.error('Error type:', error?.constructor?.name);
+      console.error('Error message:', error instanceof Error ? error.message : String(error));
+      console.error('Error stack:', error instanceof Error ? error.stack : 'N/A');
       setIsLoading(false);
       setError(error instanceof Error ? error.message : 'An unknown error occurred');
       setLoadingMessage(undefined);
@@ -1173,6 +1217,9 @@ IMPORTANT:
       console.log('Repository fetch already in progress, skipping duplicate call');
       return;
     }
+
+    console.log('=== fetchRepositoryStructure START ===');
+    console.log('Repo info:', { owner, repo, type: effectiveRepoInfo.type, hasToken: !!currentToken, tokenLength: currentToken?.length || 0 });
 
     // Reset previous state
     setWikiStructure(undefined);
@@ -1192,6 +1239,31 @@ IMPORTANT:
 
       let fileTreeData = '';
       let readmeContent = '';
+
+      // Define exclusion/inclusion filters for file tree (used by all repo types)
+      const defaultExclusions = ['node_modules', '.git', 'dist', 'build', 'coverage', '.next', '__pycache__', '.venv', 'venv'];
+      const userExclusions = modelExcludedDirs?.split('\n').filter(Boolean) || [];
+      const allExclusions = [...new Set([...defaultExclusions, ...userExclusions])];
+      const userInclusions = modelIncludedDirs?.split('\n').filter(Boolean) || [];
+
+      // Helper to filter file paths based on exclusions/inclusions
+      const filterFilePath = (path: string): boolean => {
+        // Check exclusions - exclude if path contains any excluded dir
+        const isExcluded = allExclusions.some(dir =>
+          path.startsWith(dir + '/') || path.includes('/' + dir + '/')
+        );
+        if (isExcluded) return false;
+
+        // Check inclusions - if specified, only include files from those dirs
+        if (userInclusions.length > 0) {
+          const isIncluded = userInclusions.some(dir =>
+            path.startsWith(dir + '/') || path === dir
+          );
+          if (!isIncluded) return false;
+        }
+
+        return true;
+      };
 
       if (effectiveRepoInfo.type === 'local' && effectiveRepoInfo.localPath) {
         try {
@@ -1275,12 +1347,12 @@ IMPORTANT:
 
             if (response.ok) {
               treeData = await response.json();
-              console.log('Successfully fetched repository structure');
+              console.log('Successfully fetched repository structure, tree items:', treeData?.tree?.length || 0);
               break;
             } else {
               const errorData = await response.text();
               apiErrorDetails = `Status: ${response.status}, Response: ${errorData}`;
-              console.error(`Error fetching repository structure: ${apiErrorDetails}`);
+              console.error(`Error fetching repository structure for branch ${branch}: ${apiErrorDetails}`);
             }
           } catch (err) {
             console.error(`Network error fetching branch ${branch}:`, err);
@@ -1295,11 +1367,16 @@ IMPORTANT:
           }
         }
 
-        // Convert tree data to a string representation
+        // Convert tree data to a string representation, applying exclusions
+        const originalCount = treeData.tree.filter((item: { type: string }) => item.type === 'blob').length;
+
         fileTreeData = treeData.tree
-          .filter((item: { type: string; path: string }) => item.type === 'blob')
+          .filter((item: { type: string; path: string }) => item.type === 'blob' && filterFilePath(item.path))
           .map((item: { type: string; path: string }) => item.path)
           .join('\n');
+
+        const filteredCount = fileTreeData.split('\n').filter(Boolean).length;
+        console.log(`File tree filtered: ${originalCount} → ${filteredCount} files (excluded: ${originalCount - filteredCount})`);
 
         // Try to fetch README.md content
         try {
@@ -1378,11 +1455,14 @@ IMPORTANT:
             throw new Error('Could not fetch repository structure. Repository might be empty or inaccessible.');
         }
 
-          // Step 3: Format file paths
+          // Step 3: Format file paths with filtering
+        const originalGitlabCount = filesData.filter((item: { type: string }) => item.type === 'blob').length;
         fileTreeData = filesData
-          .filter((item: { type: string; path: string }) => item.type === 'blob')
+          .filter((item: { type: string; path: string }) => item.type === 'blob' && filterFilePath(item.path))
           .map((item: { type: string; path: string }) => item.path)
           .join('\n');
+        const filteredGitlabCount = fileTreeData.split('\n').filter(Boolean).length;
+        console.log(`GitLab file tree filtered: ${originalGitlabCount} → ${filteredGitlabCount} files`);
 
           // Step 4: Try to fetch README.md content
           const readmeUrl = `${projectInfoUrl}/repository/files/README.md/raw`;
@@ -1459,11 +1539,14 @@ IMPORTANT:
           }
         }
 
-        // Convert files data to a string representation
+        // Convert files data to a string representation with filtering
+        const originalBitbucketCount = filesData.values.filter((item: { type: string }) => item.type === 'commit_file').length;
         fileTreeData = filesData.values
-          .filter((item: { type: string; path: string }) => item.type === 'commit_file')
+          .filter((item: { type: string; path: string }) => item.type === 'commit_file' && filterFilePath(item.path))
           .map((item: { type: string; path: string }) => item.path)
           .join('\n');
+        const filteredBitbucketCount = fileTreeData.split('\n').filter(Boolean).length;
+        console.log(`Bitbucket file tree filtered: ${originalBitbucketCount} → ${filteredBitbucketCount} files`);
 
         // Try to fetch README.md content
         try {
@@ -1484,10 +1567,14 @@ IMPORTANT:
       }
 
       // Now determine the wiki structure
+      console.log('=== Calling determineWikiStructure ===');
+      console.log('File tree length:', fileTreeData.length, 'README length:', readmeContent.length);
       await determineWikiStructure(fileTreeData, readmeContent, owner, repo);
+      console.log('=== fetchRepositoryStructure COMPLETE ===');
 
     } catch (error) {
-      console.error('Error fetching repository structure:', error);
+      console.error('=== fetchRepositoryStructure FAILED ===');
+      console.error('Error:', error);
       setIsLoading(false);
       setError(error instanceof Error ? error.message : 'An unknown error occurred');
       setLoadingMessage(undefined);

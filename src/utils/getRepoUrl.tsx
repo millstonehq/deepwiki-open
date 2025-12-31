@@ -9,7 +9,14 @@ export default function getRepoUrl(repoInfo: RepoInfo): string {
       return repoInfo.repoUrl;
     } else {
       if(repoInfo.owner && repoInfo.repo) {
-        return "http://example/" + repoInfo.owner + "/" + repoInfo.repo;
+        // Construct proper URL based on repo type
+        const baseUrls: Record<string, string> = {
+          'github': 'https://github.com',
+          'gitlab': 'https://gitlab.com',
+          'bitbucket': 'https://bitbucket.org',
+        };
+        const baseUrl = baseUrls[repoInfo.type || 'github'] || 'https://github.com';
+        return `${baseUrl}/${repoInfo.owner}/${repoInfo.repo}`;
       }
       return '';
     }
