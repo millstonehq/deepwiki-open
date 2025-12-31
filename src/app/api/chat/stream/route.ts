@@ -30,6 +30,8 @@ export async function POST(req: NextRequest) {
     // If the backend service returned an error, forward that error to the client
     if (!backendResponse.ok) {
       const errorBody = await backendResponse.text();
+      // Log the error for debugging
+      console.error(`Backend error (${backendResponse.status}): ${errorBody.substring(0, 500)}`);
       const errorHeaders = new Headers();
       backendResponse.headers.forEach((value, key) => {
         errorHeaders.set(key, value);
