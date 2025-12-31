@@ -411,7 +411,12 @@ class AzureAIClient(ModelClient):
         """
         kwargs is the combined input and model_kwargs.  Support streaming call.
         """
-        log.info(f"api_kwargs: {api_kwargs}")
+        # Log only model info, not the full input (which can be huge for embeddings)
+        log_kwargs = {k: v for k, v in api_kwargs.items() if k != 'input'}
+        if 'input' in api_kwargs:
+            input_val = api_kwargs['input']
+            log_kwargs['input_count'] = len(input_val) if isinstance(input_val, list) else 1
+        log.debug(f"api_kwargs: {log_kwargs}")
         if model_type == ModelType.EMBEDDER:
             return self.sync_client.embeddings.create(**api_kwargs)
         elif model_type == ModelType.LLM:

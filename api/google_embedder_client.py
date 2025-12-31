@@ -221,6 +221,7 @@ class GoogleEmbedderClient(ModelClient):
         if model_type != ModelType.EMBEDDER:
             raise ValueError(f"GoogleEmbedderClient only supports EMBEDDER model type")
             
+        # Log only model info, not the full content (which can be huge)
         safe_log_kwargs = {k: v for k, v in api_kwargs.items() if k not in {"content", "contents"}}
         if "content" in api_kwargs:
             safe_log_kwargs["content_chars"] = len(str(api_kwargs.get("content", "")))
@@ -230,7 +231,7 @@ class GoogleEmbedderClient(ModelClient):
                 safe_log_kwargs["contents_count"] = len(contents) if hasattr(contents, "__len__") else None
             except Exception:
                 safe_log_kwargs["contents_count"] = None
-        log.info("Google AI Embeddings call kwargs (sanitized): %s", safe_log_kwargs)
+        log.debug("Google AI Embeddings call kwargs (sanitized): %s", safe_log_kwargs)
         
         try:
             # Use embed_content for single text or batch embedding
