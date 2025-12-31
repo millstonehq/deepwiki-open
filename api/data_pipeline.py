@@ -282,8 +282,14 @@ def download_repo(repo_url: str, local_path: str, repo_type: str = None, access_
             # Also remove URL-encoded token to prevent leaking encoded version
             encoded_token = quote(access_token, safe='')
             error_msg = error_msg.replace(encoded_token, "***TOKEN***")
+        # Log the full error for debugging
+        logger.error(f"Git clone failed for {repo_url}")
+        logger.error(f"Exit code: {e.returncode}")
+        logger.error(f"Git error output: {error_msg}")
+        logger.error(f"Token provided: {'yes' if access_token else 'no'}")
         raise ValueError(f"Error during cloning: {error_msg}")
     except Exception as e:
+        logger.error(f"Unexpected error cloning {repo_url}: {str(e)}")
         raise ValueError(f"An unexpected error occurred: {str(e)}")
 
 # Alias for backward compatibility
@@ -974,7 +980,9 @@ class DatabaseManager:
             logger.info(f"Repo paths: {self.repo_paths}")
 
         except Exception as e:
-            logger.error(f"Failed to create repository structure: {e}")
+            logger.error(f"Failed to create repository structure for {repo_url_or_path}")
+            logger.error(f"Repo type: {repo_type}, Token provided: {'yes' if access_token else 'no'}")
+            logger.error(f"Error details: {e}")
             raise
 
     def prepare_db_index(self, embedder_type: str = None, is_ollama_embedder: bool = None, 
