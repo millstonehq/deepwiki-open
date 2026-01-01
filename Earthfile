@@ -13,7 +13,7 @@ frontend-deps:
     FROM ghcr.io/millstonehq/bun:1
     WORKDIR /app
 
-    COPY ${SRC_PATH}/package.json ${SRC_PATH}/bun.lock* ${SRC_PATH}/yarn.lock* ${SRC_PATH}/package-lock.json* ./
+    COPY ${SRC_PATH}/package.json ${SRC_PATH}/bun.lock ./
     RUN bun install --frozen-lockfile || bun install
 
     SAVE ARTIFACT node_modules
@@ -30,7 +30,8 @@ frontend-build:
     ENV NEXT_TELEMETRY_DISABLED=1
     RUN bun run build
 
-    SAVE ARTIFACT .next
+    SAVE ARTIFACT .next/standalone
+    SAVE ARTIFACT .next/static
     SAVE ARTIFACT public
 
 frontend-test:
@@ -49,8 +50,8 @@ frontend-image:
     WORKDIR /app
 
     COPY (+frontend-build/public --SRC_PATH=${SRC_PATH}) ./public
-    COPY (+frontend-build/.next/standalone --SRC_PATH=${SRC_PATH}) ./
-    COPY (+frontend-build/.next/static --SRC_PATH=${SRC_PATH}) ./.next/static
+    COPY (+frontend-build/standalone --SRC_PATH=${SRC_PATH}) ./
+    COPY (+frontend-build/static --SRC_PATH=${SRC_PATH}) ./.next/static
 
     ENV PORT=3000
     EXPOSE 3000
@@ -70,8 +71,8 @@ api-deps:
     FROM ghcr.io/millstonehq/python:3.14
     WORKDIR /app
 
-    COPY ${SRC_PATH}/api/pyproject.toml ${SRC_PATH}/api/uv.lock* ./
-    RUN uv sync --frozen --no-dev || uv sync --no-dev
+    COPY ${SRC_PATH}/api/pyproject.toml ${SRC_PATH}/uv.lock ./
+    RUN uv sync --frozen --no-install-project --no-dev || uv sync --no-install-project --no-dev
 
     SAVE ARTIFACT .venv
 
@@ -80,8 +81,8 @@ api-test:
     FROM ghcr.io/millstonehq/python:3.14
     WORKDIR /app
 
-    COPY ${SRC_PATH}/api/pyproject.toml ${SRC_PATH}/api/uv.lock* ./
-    RUN uv sync --frozen || uv sync
+    COPY ${SRC_PATH}/api/pyproject.toml ${SRC_PATH}/uv.lock ./
+    RUN uv sync --frozen --no-install-project || uv sync --no-install-project
 
     COPY --dir ${SRC_PATH}/api ./api
     COPY --dir ${SRC_PATH}/tests ./tests
@@ -91,7 +92,7 @@ api-test:
 api-image:
     ARG TARGETPLATFORM
     ARG SRC_PATH=.
-    FROM --platform=$TARGETPLATFORM base-images+base-python-runtime
+    FROM --platform=$TARGETPLATFORM ghcr.io/millstonehq/python:3.14-runtime
     WORKDIR /app
 
     COPY (+api-deps/.venv --SRC_PATH=${SRC_PATH}) ./.venv

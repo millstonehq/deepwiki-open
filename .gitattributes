@@ -1,0 +1,5 @@
+# Lock files: always keep ours on merge (avoid conflicts with upstream)
+bun.lock merge=ours
+package-lock.json merge=ours
+yarn.lock merge=ours
+uv.lock merge=ours
