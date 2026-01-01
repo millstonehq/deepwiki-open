@@ -40,6 +40,31 @@
         }
       }
     },
+    "vertex": {
+      "client_class": "VertexAIClient",
+      "default_model": "gemini-3-flash-preview",
+      "supportsCustomModel": true,
+      "models": {
+        "gemini-3-flash-preview": {
+          "temperature": 1.0,
+          "top_p": 0.8,
+          "thinking_level": "medium"
+        },
+        "gemini-3-pro-preview": {
+          "temperature": 1.0,
+          "top_p": 0.8,
+          "thinking_level": "high"
+        },
+        "gemini-2.5-flash": {
+          "temperature": 1.0,
+          "top_p": 0.8
+        },
+        "gemini-2.5-pro": {
+          "temperature": 1.0,
+          "top_p": 0.8
+        }
+      }
+    },
     "openai": {
       "default_model": "gpt-5.2",
       "supportsCustomModel": true,

@@ -11,6 +11,8 @@ from api.openai_client import OpenAIClient
 from api.openrouter_client import OpenRouterClient
 from api.bedrock_client import BedrockClient
 from api.google_embedder_client import GoogleEmbedderClient
+from api.vertex_client import VertexAIClient
+from api.vertex_embedder_client import VertexEmbedderClient
 from api.azureai_client import AzureAIClient
 from api.dashscope_client import DashscopeClient
 from adalflow import GoogleGenAIClient, OllamaClient
@@ -58,6 +60,8 @@ CONFIG_DIR = os.environ.get('DEEPWIKI_CONFIG_DIR', None)
 CLIENT_CLASSES = {
     "GoogleGenAIClient": GoogleGenAIClient,
     "GoogleEmbedderClient": GoogleEmbedderClient,
+    "VertexAIClient": VertexAIClient,
+    "VertexEmbedderClient": VertexEmbedderClient,
     "OpenAIClient": OpenAIClient,
     "OpenRouterClient": OpenRouterClient,
     "OllamaClient": OllamaClient,
@@ -131,9 +135,10 @@ def load_generator_config():
             if provider_config.get("client_class") in CLIENT_CLASSES:
                 provider_config["model_client"] = CLIENT_CLASSES[provider_config["client_class"]]
             # Fall back to default mapping based on provider_id
-            elif provider_id in ["google", "openai", "openrouter", "ollama", "bedrock", "azure", "dashscope"]:
+            elif provider_id in ["google", "vertex", "openai", "openrouter", "ollama", "bedrock", "azure", "dashscope"]:
                 default_map = {
                     "google": GoogleGenAIClient,
+                    "vertex": VertexAIClient,
                     "openai": OpenAIClient,
                     "openrouter": OpenRouterClient,
                     "ollama": OllamaClient,
@@ -152,7 +157,7 @@ def load_embedder_config():
     embedder_config = load_json_config("embedder.json")
 
     # Process client classes
-    for key in ["embedder", "embedder_ollama", "embedder_google", "embedder_bedrock"]:
+    for key in ["embedder", "embedder_ollama", "embedder_google", "embedder_vertex", "embedder_bedrock"]:
         if key in embedder_config and "client_class" in embedder_config[key]:
             class_name = embedder_config[key]["client_class"]
             if class_name in CLIENT_CLASSES:
@@ -170,6 +175,8 @@ def get_embedder_config():
     embedder_type = EMBEDDER_TYPE
     if embedder_type == 'bedrock' and 'embedder_bedrock' in configs:
         return configs.get("embedder_bedrock", {})
+    elif embedder_type == 'vertex' and 'embedder_vertex' in configs:
+        return configs.get("embedder_vertex", {})
     elif embedder_type == 'google' and 'embedder_google' in configs:
         return configs.get("embedder_google", {})
     elif embedder_type == 'ollama' and 'embedder_ollama' in configs:
@@ -235,15 +242,35 @@ def is_bedrock_embedder():
     client_class = embedder_config.get("client_class", "")
     return client_class == "BedrockClient"
 
+def is_vertex_embedder():
+    """
+    Check if the current embedder configuration uses VertexEmbedderClient.
+
+    Returns:
+        bool: True if using VertexEmbedderClient, False otherwise
+    """
+    embedder_config = get_embedder_config()
+    if not embedder_config:
+        return False
+
+    model_client = embedder_config.get("model_client")
+    if model_client:
+        return model_client.__name__ == "VertexEmbedderClient"
+
+    client_class = embedder_config.get("client_class", "")
+    return client_class == "VertexEmbedderClient"
+
 def get_embedder_type():
     """
     Get the current embedder type based on configuration.
-    
+
     Returns:
-        str: 'bedrock', 'ollama', 'google', or 'openai' (default)
+        str: 'bedrock', 'vertex', 'ollama', 'google', or 'openai' (default)
     """
     if is_bedrock_embedder():
         return 'bedrock'
+    elif is_vertex_embedder():
+        return 'vertex'
     elif is_ollama_embedder():
         return 'ollama'
     elif is_google_embedder():
@@ -341,7 +368,7 @@ if generator_config:
 
 # Update embedder configuration
 if embedder_config:
-    for key in ["embedder", "embedder_ollama", "embedder_google", "embedder_bedrock", "retriever", "text_splitter"]:
+    for key in ["embedder", "embedder_ollama", "embedder_google", "embedder_vertex", "embedder_bedrock", "retriever", "text_splitter"]:
         if key in embedder_config:
             configs[key] = embedder_config[key]
 

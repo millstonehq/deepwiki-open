@@ -30,6 +30,14 @@
       "dimensions": 256
     }
   },
+  "embedder_vertex": {
+    "client_class": "VertexEmbedderClient",
+    "batch_size": 100,
+    "model_kwargs": {
+      "model": "text-embedding-005",
+      "task_type": "SEMANTIC_SIMILARITY"
+    }
+  },
   "retriever": {
     "top_k": 20
   },
