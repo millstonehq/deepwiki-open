@@ -28,7 +28,13 @@ frontend-build:
     COPY --dir ${SRC_PATH}/src ${SRC_PATH}/public ./
 
     ENV NEXT_TELEMETRY_DISABLED=1
-    RUN bun run build
+    RUN bun run build && \
+        echo "=== Build output structure ===" && \
+        ls -la .next/ && \
+        echo "=== standalone contents ===" && \
+        ls -la .next/standalone/ 2>/dev/null || echo "NO .next/standalone/" && \
+        echo "=== static contents ===" && \
+        ls -la .next/static/ 2>/dev/null || echo "NO .next/static/"
 
     SAVE ARTIFACT .next/standalone
     SAVE ARTIFACT .next/static

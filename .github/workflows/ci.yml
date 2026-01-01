@@ -6,6 +6,11 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      no_cache:
+        description: 'Disable remote cache (rebuild from scratch)'
+        required: false
+        default: 'false'
 
 jobs:
   build-and-publish:
@@ -32,6 +37,7 @@ jobs:
         with:
           earthly-target: '+all'
           push: 'false'
+          no-cache: ${{ github.event.inputs.no_cache || 'false' }}
 
       - name: Build, Test and Publish (Main)
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -39,6 +45,15 @@ jobs:
         with:
           earthly-target: '+publish'
           push: 'true'
+          no-cache: ${{ github.event.inputs.no_cache || 'false' }}
+
+      - name: Build and Test (Manual)
+        if: github.event_name == 'workflow_dispatch'
+        uses: ./.github/actions/earthly-build
+        with:
+          earthly-target: '+all'
+          push: 'false'
+          no-cache: ${{ github.event.inputs.no_cache || 'false' }}
 
       - name: Build Summary (PR)
         if: success() && github.event_name == 'pull_request'
